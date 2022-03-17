@@ -1,4 +1,5 @@
-use image::{error::ImageError, GenericImage, GenericImageView, ImageBuffer, Rgb, RgbImage};
+use image::{error::ImageError, ImageBuffer, Rgb, RgbImage};
+use rand::{thread_rng, Rng};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Vec3 {
@@ -109,6 +110,15 @@ impl std::ops::Div<f64> for Vec3 {
         Vec3::new(self.x / rhs, self.y / rhs, self.z / rhs)
     }
 }
+
+impl std::ops::AddAssign for Vec3 {
+    fn add_assign(&mut self, rhs: Self) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+        self.z += rhs.z;
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Ray {
     origin: Vec3,
@@ -209,6 +219,41 @@ impl Hittable for Sphere {
     }
 }
 
+struct Camera {
+    lower_left_corner: Vec3,
+    horizontal: Vec3,
+    vertical: Vec3,
+    origin: Vec3,
+}
+
+impl Default for Camera {
+    fn default() -> Self {
+        Self {
+            lower_left_corner: Vec3::new(-2, -1, -1),
+            horizontal: Vec3::new(4, 0, 0),
+            vertical: Vec3::new(0, 2, 0),
+            origin: Vec3::new(0, 0, 0),
+        }
+    }
+}
+impl Camera {
+    fn new(lower_left_corner: Vec3, horizontal: Vec3, vertical: Vec3, origin: Vec3) -> Self {
+        Self {
+            lower_left_corner,
+            horizontal,
+            vertical,
+            origin,
+        }
+    }
+
+    fn get_ray(&self, u: f64, v: f64) -> Ray {
+        Ray::new(
+            self.origin,
+            self.lower_left_corner + u * self.horizontal + v * self.vertical,
+        )
+    }
+}
+
 fn color(r: &Ray, world: &World) -> Vec3 {
     if let Some(hit) = world.hit(r, 0.0, f64::MAX) {
         println!("t, p: {}, {:?}", hit.t, r.point_at_parameter(hit.t));
@@ -224,27 +269,24 @@ fn color(r: &Ray, world: &World) -> Vec3 {
 
 fn main() -> Result<(), ImageError> {
     let (width, height) = (200, 100);
-    let dx: f64 = 1f64 / width as f64;
-    let dy: f64 = 1f64 / height as f64;
-
+    let samples = 50;
     let world = World::new()
         .add(Box::new(Sphere::new(Vec3::new(0, 0, -1), 0.5)))
         .add(Box::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0)));
-    let lower_left_corner = Vec3::new(-2, -1, -1);
-    let horizontal = Vec3::new(4, 0, 0);
-    let vertical = Vec3::new(0, 2, 0);
-    let origin = Vec3::new(0, 0, 0);
+    let camera: Camera = Default::default();
+    let mut rng = thread_rng();
     let img: RgbImage = ImageBuffer::from_fn(width, height, |x, y| {
-        println!("(x, y) = ({}, {})", x, y);
-        let u = dx * x as f64;
-        let v = dy * (height - y) as f64; // adjust for image coordinate system
-        let r = Ray::new(origin, lower_left_corner + u * horizontal + v * vertical);
-        let c = color(&r, &world);
-        println!("color: {:?}", c);
+        let mut colors = Vec3::new(0.0, 0.0, 0.0);
+        for _ in 0..samples {
+            let u = (x as f64 + rng.gen_range(0.0..1.0)) / width as f64;
+            let v = ((height - y) as f64 + rng.gen_range(0.0..1.0)) / height as f64; // adjust for image coordinate system
+            let r = camera.get_ray(u, v);
+            colors += color(&r, &world);
+        }
         Rgb([
-            (255.0 * c.x) as u8,
-            (255.0 * c.y) as u8,
-            (255.0 * c.z) as u8,
+            (255.0 * (colors.x / samples as f64)) as u8,
+            (255.0 * (colors.y / samples as f64)) as u8,
+            (255.0 * (colors.z / samples as f64)) as u8,
         ])
     });
     img.save("file.jpg")?;
