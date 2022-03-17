@@ -36,6 +36,21 @@ impl Vec3 {
             z: self.z / len,
         }
     }
+
+    fn random_in_unit_sphere() -> Self {
+        let mut rng = thread_rng();
+        loop {
+            let v = Vec3::new(
+                rng.gen_range(0.0..1.0),
+                rng.gen_range(0.0..1.0),
+                rng.gen_range(0.0..1.0),
+            );
+            if v.x * v.x + v.y * v.y + v.z + v.z > 1.0 {
+                return v;
+            }
+        }
+    }
+
     fn dot(lhs: &Self, rhs: &Self) -> f64 {
         lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z
     }
@@ -255,9 +270,9 @@ impl Camera {
 }
 
 fn color(r: &Ray, world: &World) -> Vec3 {
-    if let Some(hit) = world.hit(r, 0.0, f64::MAX) {
-        println!("t, p: {}, {:?}", hit.t, r.point_at_parameter(hit.t));
-        return 0.5 * Vec3::new(hit.normal.x + 1.0, hit.normal.y + 1.0, hit.normal.z + 1.0);
+    if let Some(hit) = world.hit(r, 0.001, f64::MAX) {
+        let target = hit.p + hit.normal + Vec3::random_in_unit_sphere();
+        return 0.5 * color(&Ray::new(hit.p, target - hit.p), world);
     }
     let ray_unit = r.direction.as_unit_vec();
     let t = 0.5 * (ray_unit.y + 1.0);
@@ -283,16 +298,18 @@ fn main() -> Result<(), ImageError> {
             let r = camera.get_ray(u, v);
             colors += color(&r, &world);
         }
+        let colors = colors / samples as f64;
+        let colors = Vec3::new(colors.x.sqrt(), colors.y.sqrt(), colors.z.sqrt());
         Rgb([
-            (255.0 * (colors.x / samples as f64)) as u8,
-            (255.0 * (colors.y / samples as f64)) as u8,
-            (255.0 * (colors.z / samples as f64)) as u8,
+            (255.0 * colors.x) as u8,
+            (255.0 * colors.y) as u8,
+            (255.0 * colors.z) as u8,
         ])
     });
     img.save("file.jpg")?;
     Ok(())
 }
-
+// TLIXSK
 #[cfg(test)]
 mod test {
 
