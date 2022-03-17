@@ -1,10 +1,7 @@
 use image::{error::ImageError, GenericImage, GenericImageView, ImageBuffer, Rgb, RgbImage};
 
 #[derive(Clone, Copy, Debug)]
-struct At(f64);
-
-#[derive(Clone, Copy, Debug)]
-struct Vec3 {
+pub(crate) struct Vec3 {
     x: f64,
     y: f64,
     z: f64,
@@ -50,6 +47,15 @@ impl Vec3 {
         }
     }
 }
+
+impl PartialEq for Vec3 {
+    fn eq(&self, other: &Self) -> bool {
+        if self.x.is_nan() || self.y.is_nan() || self.z.is_nan() {
+            return false;
+        }
+        return self.x.eq(&other.x);
+    }
+}
 impl std::ops::Add for Vec3 {
     type Output = Self;
 
@@ -84,18 +90,6 @@ impl std::ops::Neg for Vec3 {
     }
 }
 
-impl std::ops::Mul<Vec3> for At {
-    type Output = Vec3;
-
-    fn mul(self, rhs: Vec3) -> Self::Output {
-        Vec3 {
-            x: self.0 * rhs.x,
-            y: self.0 * rhs.y,
-            z: self.0 * rhs.z,
-        }
-    }
-}
-
 impl std::ops::Mul<Vec3> for f64 {
     type Output = Vec3;
 
@@ -107,12 +101,14 @@ impl std::ops::Mul<Vec3> for f64 {
         }
     }
 }
-impl From<f64> for At {
-    fn from(f: f64) -> Self {
-        At(f)
+
+impl std::ops::Div<f64> for Vec3 {
+    type Output = Vec3;
+
+    fn div(self, rhs: f64) -> Self::Output {
+        Vec3::new(self.x / rhs, self.y / rhs, self.z / rhs)
     }
 }
-
 #[derive(Clone, Copy, Debug)]
 struct Ray {
     origin: Vec3,
@@ -124,32 +120,106 @@ impl Ray {
         Self { origin, direction }
     }
 
-    fn point_at_parameter(&self, t: At) -> Vec3 {
+    fn point_at_parameter(&self, t: f64) -> Vec3 {
         self.origin + t * self.direction
     }
 }
 
-fn hit_sphere(center: &Vec3, radius: f64, ray: &Ray) -> bool {
-    println!("origin: {:?}, direction: {:?}", ray.origin, ray.direction);
-    let oc = ray.origin - *center;
-    let a = Vec3::dot(&ray.direction, &ray.direction);
-    let b = 2.0 * Vec3::dot(&oc, &ray.direction);
-    let c = Vec3::dot(&oc, &oc) - radius * radius;
-    let discriminant = b * b - 4.0 * a * c;
-    println!("discrim: {}", discriminant);
-    discriminant > 0.0
+struct Hit {
+    t: f64,
+    p: Vec3,
+    normal: Vec3,
 }
 
-fn color(r: &Ray) -> Vec3 {
-    if hit_sphere(&Vec3::new(0, 0, -1), 0.5, r) {
-        println!("HIT");
-        return Vec3::new(1, 0, 0);
+impl Hit {
+    fn new(t: f64, p: Vec3, normal: Vec3) -> Self {
+        Hit { t, p, normal }
+    }
+}
+
+trait Hittable {
+    fn hit(&self, r: &Ray, t_min: f64, t_max: f64) -> Option<Hit>;
+}
+
+struct World {
+    objects: Vec<Box<dyn Hittable>>,
+}
+
+impl World {
+    fn new() -> Self {
+        Self { objects: vec![] }
+    }
+
+    fn add(mut self, o: Box<dyn Hittable>) -> Self {
+        self.objects.push(o);
+        self
+    }
+}
+
+impl Hittable for World {
+    fn hit(&self, ray: &Ray, t_min: f64, t_max: f64) -> Option<Hit> {
+        let mut closest = t_max;
+        let mut winner: Option<Hit> = None;
+
+        for o in &self.objects {
+            match o.hit(ray, t_min, closest) {
+                Some(h) => {
+                    closest = h.t;
+                    winner = Some(h);
+                }
+                None => (),
+            }
+        }
+        return winner;
+    }
+}
+struct Sphere {
+    center: Vec3,
+    radius: f64,
+}
+
+impl Sphere {
+    fn new(center: Vec3, radius: f64) -> Self {
+        Self { center, radius }
+    }
+}
+
+impl Hittable for Sphere {
+    fn hit(&self, ray: &Ray, t_min: f64, t_max: f64) -> Option<Hit> {
+        let oc = ray.origin - self.center;
+        let a = Vec3::dot(&ray.direction, &ray.direction);
+        let b = Vec3::dot(&oc, &ray.direction);
+        let c = Vec3::dot(&oc, &oc) - self.radius * self.radius;
+        let discriminant = b * b - a * c;
+        if discriminant < 0.0 {
+            None
+        } else {
+            let p = (-b - (b * b - a * c).sqrt()) / a;
+            if p < t_max && p > t_min {
+                let pp = ray.point_at_parameter(p);
+                return Some(Hit::new(p, pp, (pp - self.center) / self.radius));
+            }
+            let p = (-b + (b * b - a * c).sqrt()) / a;
+            if p < t_max && p > t_min {
+                let pp = ray.point_at_parameter(p);
+                return Some(Hit::new(p, pp, (pp - self.center) / self.radius));
+            }
+            return None;
+        }
+    }
+}
+
+fn color(r: &Ray, world: &World) -> Vec3 {
+    if let Some(hit) = world.hit(r, 0.0, f64::MAX) {
+        println!("t, p: {}, {:?}", hit.t, r.point_at_parameter(hit.t));
+        return 0.5 * Vec3::new(hit.normal.x + 1.0, hit.normal.y + 1.0, hit.normal.z + 1.0);
     }
     let ray_unit = r.direction.as_unit_vec();
     let t = 0.5 * (ray_unit.y + 1.0);
     let v1 = Vec3::new(1, 1, 1);
-    let v2 = Vec3::new(0.0, 10.7, 1.0);
-    return ((1.0 - t) * v1 + t * v2).as_unit_vec();
+    let v2 = Vec3::new(0.5, 0.7, 1.0);
+    return Vec3::new(0, 0, 1);
+    //    return ((1.0 - t) * v1 + t * v2).as_unit_vec();
 }
 
 fn main() -> Result<(), ImageError> {
@@ -157,6 +227,9 @@ fn main() -> Result<(), ImageError> {
     let dx: f64 = 1f64 / width as f64;
     let dy: f64 = 1f64 / height as f64;
 
+    let world = World::new()
+        .add(Box::new(Sphere::new(Vec3::new(0, 0, -1), 0.5)))
+        .add(Box::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0)));
     let lower_left_corner = Vec3::new(-2, -1, -1);
     let horizontal = Vec3::new(4, 0, 0);
     let vertical = Vec3::new(0, 2, 0);
@@ -164,9 +237,10 @@ fn main() -> Result<(), ImageError> {
     let img: RgbImage = ImageBuffer::from_fn(width, height, |x, y| {
         println!("(x, y) = ({}, {})", x, y);
         let u = dx * x as f64;
-        let v = dy * y as f64;
+        let v = dy * (height - y) as f64; // adjust for image coordinate system
         let r = Ray::new(origin, lower_left_corner + u * horizontal + v * vertical);
-        let c = color(&r);
+        let c = color(&r, &world);
+        println!("color: {:?}", c);
         Rgb([
             (255.0 * c.x) as u8,
             (255.0 * c.y) as u8,
@@ -177,13 +251,20 @@ fn main() -> Result<(), ImageError> {
     Ok(())
 }
 
+#[cfg(test)]
 mod test {
 
     use super::*;
 
     #[test]
-    fn test_hit_sphere() {
-        let r = Ray::new(Vec3::new(0, 0, 0), Vec3::new(0, 0, -1));
-        assert!(hit_sphere(&Vec3::new(0, 0, -1), 05., &r));
+    fn test_len() {
+        assert_eq!(1.0, Vec3::new(0, 1, 0).length());
+        assert_eq!(3.0, Vec3::new(3, 0, 0).length());
+        assert_eq!(5.0, Vec3::new(3, 4, 0).length());
+    }
+
+    #[test]
+    fn test_add_vec() {
+        assert_eq!(Vec3::new(1, 1, 0), Vec3::new(1, 0, 0) + Vec3::new(0, 1, 0));
     }
 }
