@@ -276,14 +276,12 @@ fn color(r: &Ray, world: &World) -> Vec3 {
     }
     let ray_unit = r.direction.as_unit_vec();
     let t = 0.5 * (ray_unit.y + 1.0);
-    let v1 = Vec3::new(1, 1, 1);
     let v2 = Vec3::new(0.5, 0.7, 1.0);
-    return Vec3::new(0, 0, 1);
-    //    return ((1.0 - t) * v1 + t * v2).as_unit_vec();
+    return ((1.0 - t) * Vec3::new(1.0, 1.0, 1.0)) + t * Vec3::new(0.5, 0.7, 1.0);
 }
 
 fn main() -> Result<(), ImageError> {
-    let (width, height) = (200, 100);
+    let (width, height) = (400, 200);
     let samples = 50;
     let world = World::new()
         .add(Box::new(Sphere::new(Vec3::new(0, 0, -1), 0.5)))
