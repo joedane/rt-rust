@@ -1,6 +1,5 @@
 use image::{error::ImageError, ImageBuffer, Rgb, RgbImage};
 use rand::{thread_rng, Rng};
-use std::{borrow::Borrow, fs::ReadDir, str::MatchIndices};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Vec3 {
@@ -21,7 +20,6 @@ impl Vec3 {
     fn length(&self) -> f64 {
         (self.x.powf(2.0) + self.y.powf(2.0) + self.z.powf(2.0)).sqrt()
     }
-
     fn normalize(&mut self) {
         let k = 1.0 / (self.x.powf(2.0) + self.y.powf(2.0) + self.z.powf(2.0)).sqrt();
         self.x *= k;
@@ -119,6 +117,17 @@ impl std::ops::Mul<&Vec3> for f64 {
     }
 }
 
+impl std::ops::Mul<f64> for &Vec3 {
+    type Output = Vec3;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self::Output {
+            x: self.x * rhs,
+            y: self.y * rhs,
+            z: self.z * rhs,
+        }
+    }
+}
 impl std::ops::Mul for Vec3 {
     type Output = Self;
 
@@ -256,12 +265,30 @@ trait Scatter {
 enum Material {
     Lambertian(Vec3),
     Metal(Vec3, f64),
+    Dielectric(f64),
 }
 
 impl Scatter for Material {
     fn scatter(&self, ray: &Ray, hit: &Hit) -> Option<ScatterRecord> {
         fn reflect(v: &Vec3, n: &Vec3) -> Vec3 {
             v - &(2.0 * Vec3::dot(v, n) * n)
+        }
+
+        fn refract(v: &Vec3, n: &Vec3, ni_over_nt: f64) -> Option<Vec3> {
+            let uv = v.as_unit_vec();
+            let dt = Vec3::dot(&uv, &n);
+            let discriminant = 1.0 - ni_over_nt * ni_over_nt * (1.0 - dt * dt);
+            if discriminant > 0.0 {
+                return Some(&(ni_over_nt * &(&uv - &(n * dt))) - &(n * discriminant.sqrt()));
+            } else {
+                return None;
+            }
+        }
+
+        fn schlick(cos: f64, index: f64) -> f64 {
+            let mut r0 = (1.0 - index) / (1.0 + index);
+            r0 = r0 * r0;
+            return r0 + (1.0 - r0) * (1.0 - cos).powf(5.0);
         }
 
         match (self) {
@@ -280,6 +307,44 @@ impl Scatter for Material {
                     return Some(ScatterRecord::new(*albedo, scattered));
                 } else {
                     return None;
+                }
+            }
+            Material::Dielectric(index) => {
+                let reflected = reflect(&ray.direction, &hit.normal);
+                let outward_normal: Vec3;
+                let ni_over_nt: f64;
+                let cosine: f64;
+
+                if Vec3::dot(&ray.direction, &hit.normal) > 0.0 {
+                    outward_normal = -hit.normal;
+                    ni_over_nt = *index;
+                    cosine =
+                        index * Vec3::dot(&ray.direction, &hit.normal) / ray.direction.length();
+                } else {
+                    outward_normal = hit.normal;
+                    ni_over_nt = 1.0 / index;
+                    cosine = -Vec3::dot(&ray.direction, &hit.normal) / ray.direction.length();
+                }
+
+                if let Some(refracted) = refract(&ray.direction, &outward_normal, ni_over_nt) {
+                    let mut reflect_prob = schlick(cosine, *index);
+                    let mut rng = thread_rng();
+                    if rng.gen_range(0.0..1.0) < reflect_prob {
+                        return Some(ScatterRecord::new(
+                            Vec3::new(1, 1, 1),
+                            Ray::new(hit.p, reflected),
+                        ));
+                    } else {
+                        return Some(ScatterRecord::new(
+                            Vec3::new(1, 1, 1),
+                            Ray::new(hit.p, refracted),
+                        ));
+                    }
+                } else {
+                    return Some(ScatterRecord::new(
+                        Vec3::new(1, 1, 1),
+                        Ray::new(hit.p, reflected),
+                    ));
                 }
             }
         }
@@ -397,7 +462,7 @@ fn main() -> Result<(), ImageError> {
         .add(Box::new(Sphere::new(
             Vec3::new(0, 0, -1),
             0.5,
-            Material::Lambertian(Vec3::new(0.8, 0.3, 0.3)),
+            Material::Lambertian(Vec3::new(0.1, 0.2, 0.5)),
         )))
         .add(Box::new(Sphere::new(
             Vec3::new(0.0, -100.5, -1.0),
@@ -412,7 +477,12 @@ fn main() -> Result<(), ImageError> {
         .add(Box::new(Sphere::new(
             Vec3::new(-1, 0, -1),
             0.5,
-            Material::Metal(Vec3::new(0.8, 0.8, 0.8), 0.0),
+            Material::Dielectric(1.5),
+        )))
+        .add(Box::new(Sphere::new(
+            Vec3::new(-1, 0, -1),
+            -0.45,
+            Material::Dielectric(1.5),
         )));
     let camera: Camera = Default::default();
     let mut rng = thread_rng();
