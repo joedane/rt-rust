@@ -1,3 +1,5 @@
+use std::f64::consts::PI;
+
 use image::{error::ImageError, ImageBuffer, Rgb, RgbImage};
 use rand::{thread_rng, Rng};
 
@@ -401,6 +403,7 @@ impl Hittable for Sphere {
     }
 }
 
+#[derive(Debug)]
 struct Camera {
     lower_left_corner: Vec3,
     horizontal: Vec3,
@@ -419,12 +422,22 @@ impl Default for Camera {
     }
 }
 impl Camera {
-    fn new(lower_left_corner: Vec3, horizontal: Vec3, vertical: Vec3, origin: Vec3) -> Self {
+    fn new(lookfrom: Vec3, lookat: Vec3, vup: Vec3, vfov: f64, aspect: f64) -> Self {
+        let lookfrom = lookfrom.as_unit_vec();
+        let lookat = lookat.as_unit_vec();
+        let vup = vup.as_unit_vec();
+        let theta = vfov * PI / 180.0;
+        let half_height = (theta / 2.0).tan();
+        let half_width = aspect * half_height;
+        let w = (&lookfrom - &lookat).as_unit_vec();
+        let u = Vec3::cross(&vup, &w).as_unit_vec();
+        let v = Vec3::cross(&w, &u);
+
         Self {
-            lower_left_corner,
-            horizontal,
-            vertical,
-            origin,
+            lower_left_corner: &(&(&lookfrom - &(half_width * &u)) - &(half_height * &v)) - &w,
+            horizontal: 2.0 * &(half_width * &u),
+            vertical: 2.0 * &(half_height * &v),
+            origin: lookfrom,
         }
     }
 
@@ -484,7 +497,15 @@ fn main() -> Result<(), ImageError> {
             -0.45,
             Material::Dielectric(1.5),
         )));
-    let camera: Camera = Default::default();
+    let camera: Camera = Camera::new(
+        Vec3::new(-2.0, 2.0, 1.0),
+        Vec3::new(0.0, 0.0, -1.0),
+        Vec3::new(0, 1, 0),
+        90.0,
+        width as f64 / height as f64,
+    );
+    println!("{:?}", camera);
+    println!("ray to lookat: {:?}", camera.get_ray(0.5, 0.5));
     let mut rng = thread_rng();
     let img: RgbImage = ImageBuffer::from_fn(width, height, |x, y| {
         let mut colors = Vec3::new(0.0, 0.0, 0.0);
@@ -505,7 +526,7 @@ fn main() -> Result<(), ImageError> {
     img.save("file.jpg")?;
     Ok(())
 }
-// TLIXSK
+
 #[cfg(test)]
 mod test {
 
