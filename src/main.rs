@@ -22,6 +22,7 @@ impl Vec3 {
     fn length(&self) -> f64 {
         (self.x.powf(2.0) + self.y.powf(2.0) + self.z.powf(2.0)).sqrt()
     }
+    #[allow(dead_code)]
     fn normalize(&mut self) {
         let k = 1.0 / (self.x.powf(2.0) + self.y.powf(2.0) + self.z.powf(2.0)).sqrt();
         self.x *= k;
@@ -31,6 +32,9 @@ impl Vec3 {
 
     fn as_unit_vec(&self) -> Self {
         let len = self.length();
+        if len == 0.0 {
+            panic!("Zero length vec");
+        }
         Self {
             x: self.x / len,
             y: self.y / len,
@@ -52,11 +56,16 @@ impl Vec3 {
         }
     }
 
-    fn dot(lhs: &Self, rhs: &Self) -> f64 {
+    fn distance(&self, other: &Vec3) -> f64 {
+        ((self.x - other.x).powi(2) + (self.y - other.y).powi(2) + (self.z - other.z).powi(2))
+            .sqrt()
+    }
+
+    fn dot(lhs: Self, rhs: Self) -> f64 {
         lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z
     }
 
-    fn cross(lhs: &Self, rhs: &Self) -> Self {
+    fn cross(lhs: Self, rhs: Self) -> Self {
         Vec3 {
             x: lhs.y * rhs.z - lhs.z * rhs.y,
             y: -(lhs.x * rhs.z - lhs.z * rhs.x),
@@ -73,7 +82,7 @@ impl PartialEq for Vec3 {
         return self.x.eq(&other.x);
     }
 }
-impl std::ops::Add for &Vec3 {
+impl std::ops::Add for Vec3 {
     type Output = Vec3;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -85,7 +94,7 @@ impl std::ops::Add for &Vec3 {
     }
 }
 
-impl std::ops::Sub for &Vec3 {
+impl std::ops::Sub for Vec3 {
     type Output = Vec3;
 
     fn sub(self, rhs: Self) -> Self::Output {
@@ -107,10 +116,10 @@ impl std::ops::Neg for Vec3 {
     }
 }
 
-impl std::ops::Mul<&Vec3> for f64 {
+impl std::ops::Mul<Vec3> for f64 {
     type Output = Vec3;
 
-    fn mul(self, rhs: &Vec3) -> Self::Output {
+    fn mul(self, rhs: Vec3) -> Self::Output {
         Self::Output {
             x: self * rhs.x,
             y: self * rhs.y,
@@ -119,7 +128,7 @@ impl std::ops::Mul<&Vec3> for f64 {
     }
 }
 
-impl std::ops::Mul<f64> for &Vec3 {
+impl std::ops::Mul<f64> for Vec3 {
     type Output = Vec3;
 
     fn mul(self, rhs: f64) -> Self::Output {
@@ -157,6 +166,7 @@ impl std::ops::AddAssign for Vec3 {
     }
 }
 
+#[allow(dead_code)]
 enum Color {
     White,
     Red,
@@ -168,11 +178,11 @@ enum Color {
 impl From<Color> for Vec3 {
     fn from(src: Color) -> Self {
         match src {
-            White => Vec3::new(1, 1, 1),
-            Red => Vec3::new(1, 0, 0),
-            Green => Vec3::new(0, 1, 0),
-            Blue => Vec3::new(0, 0, 1),
-            Black => Vec3::new(0, 0, 0),
+            Color::White => Vec3::new(1, 1, 1),
+            Color::Red => Vec3::new(1, 0, 0),
+            Color::Green => Vec3::new(0, 1, 0),
+            Color::Blue => Vec3::new(0, 0, 1),
+            Color::Black => Vec3::new(0, 0, 0),
         }
     }
 }
@@ -189,7 +199,7 @@ impl Ray {
     }
 
     fn point_at_parameter(&self, t: f64) -> Vec3 {
-        &self.origin + &(t * &self.direction)
+        self.origin + (t * self.direction)
     }
 }
 
@@ -248,40 +258,26 @@ impl Hittable for World {
     }
 }
 
-struct ScatterRecord {
-    attenuation: Vec3,
-    scattered: Ray,
-}
-impl ScatterRecord {
-    fn new(attenuation: Vec3, scattered: Ray) -> Self {
-        Self {
-            attenuation,
-            scattered,
-        }
-    }
-}
-trait Scatter {
-    fn scatter(&self, ray: &Ray, hit: &Hit) -> Option<ScatterRecord>;
-}
-
+#[allow(dead_code)]
 enum Material {
+    Simple(Vec3),
     Lambertian(Vec3),
     Metal(Vec3, f64),
-    Dielectric(f64),
+    Dielectric(Vec3, f64),
 }
 
-impl Scatter for Material {
-    fn scatter(&self, ray: &Ray, hit: &Hit) -> Option<ScatterRecord> {
-        fn reflect(v: &Vec3, n: &Vec3) -> Vec3 {
-            v - &(2.0 * Vec3::dot(v, n) * n)
+impl Material {
+    fn color(&self, world: &World, ray: &Ray, hit: &Hit, depth: u32) -> Vec3 {
+        fn reflect(v: Vec3, n: Vec3) -> Vec3 {
+            v - (2.0 * Vec3::dot(v, n) * n)
         }
 
-        fn refract(v: &Vec3, n: &Vec3, ni_over_nt: f64) -> Option<Vec3> {
+        fn refract(v: Vec3, n: Vec3, ni_over_nt: f64) -> Option<Vec3> {
             let uv = v.as_unit_vec();
-            let dt = Vec3::dot(&uv, &n);
+            let dt = Vec3::dot(uv, n);
             let discriminant = 1.0 - ni_over_nt * ni_over_nt * (1.0 - dt * dt);
             if discriminant > 0.0 {
-                return Some(&(ni_over_nt * &(&uv - &(n * dt))) - &(n * discriminant.sqrt()));
+                return Some(ni_over_nt * (uv - (n * dt)) - n * discriminant.sqrt());
             } else {
                 return None;
             }
@@ -293,62 +289,95 @@ impl Scatter for Material {
             return r0 + (1.0 - r0) * (1.0 - cos).powf(5.0);
         }
 
-        match (self) {
+        match self {
+            Material::Simple(color) => {
+                return color.clone();
+            }
             Material::Lambertian(albedo) => {
-                let target = &(hit.p) + &(&hit.normal + &Vec3::random_in_unit_sphere());
-                let scattered = Ray::new(hit.p, &target - &hit.p);
-                return Some(ScatterRecord::new(*albedo, scattered));
+                let target = hit.p + hit.normal + Vec3::random_in_unit_sphere();
+                let scattered = Ray::new(hit.p, target - hit.p);
+                return *albedo * color_at(&scattered, world, depth + 1);
             }
             Material::Metal(albedo, fuzz) => {
-                let reflected = reflect(&ray.direction.as_unit_vec(), &hit.normal);
-                let scattered = Ray::new(
-                    hit.p,
-                    &reflected + &(*fuzz * &Vec3::random_in_unit_sphere()),
-                );
-                if Vec3::dot(&scattered.direction, &hit.normal) > 0.0 {
-                    return Some(ScatterRecord::new(*albedo, scattered));
+                let reflected = reflect(ray.direction.as_unit_vec(), hit.normal);
+                let scattered =
+                    Ray::new(hit.p, reflected + (*fuzz * Vec3::random_in_unit_sphere()));
+                if Vec3::dot(scattered.direction, hit.normal) > 0.0 {
+                    return *albedo * color_at(&scattered, world, depth + 1);
                 } else {
-                    return None;
+                    // why do this?
+                    return Color::Black.into();
                 }
             }
-            Material::Dielectric(index) => {
-                let reflected = reflect(&ray.direction, &hit.normal);
+            Material::Dielectric(albedo, index) => {
+                let reflected = reflect(ray.direction, hit.normal);
                 let outward_normal: Vec3;
                 let ni_over_nt: f64;
                 let cosine: f64;
 
-                if Vec3::dot(&ray.direction, &hit.normal) > 0.0 {
+                if Vec3::dot(ray.direction, hit.normal) > 0.0 {
                     outward_normal = -hit.normal;
                     ni_over_nt = *index;
-                    cosine =
-                        index * Vec3::dot(&ray.direction, &hit.normal) / ray.direction.length();
+                    cosine = index * Vec3::dot(ray.direction, hit.normal) / ray.direction.length();
                 } else {
                     outward_normal = hit.normal;
                     ni_over_nt = 1.0 / index;
-                    cosine = -Vec3::dot(&ray.direction, &hit.normal) / ray.direction.length();
+                    cosine = -Vec3::dot(ray.direction, hit.normal) / ray.direction.length();
                 }
 
-                if let Some(refracted) = refract(&ray.direction, &outward_normal, ni_over_nt) {
-                    let mut reflect_prob = schlick(cosine, *index);
+                if let Some(refracted) = refract(ray.direction, outward_normal, ni_over_nt) {
+                    let reflect_prob = schlick(cosine, *index);
                     let mut rng = thread_rng();
                     if rng.gen_range(0.0..1.0) < reflect_prob {
-                        return Some(ScatterRecord::new(
-                            Vec3::new(1, 1, 1),
-                            Ray::new(hit.p, reflected),
-                        ));
+                        return *albedo * color_at(&Ray::new(hit.p, reflected), world, depth + 1);
                     } else {
-                        return Some(ScatterRecord::new(
-                            Vec3::new(1, 1, 1),
-                            Ray::new(hit.p, refracted),
-                        ));
+                        return *albedo * color_at(&Ray::new(hit.p, refracted), world, depth + 1);
                     }
                 } else {
-                    return Some(ScatterRecord::new(
-                        Vec3::new(1, 1, 1),
-                        Ray::new(hit.p, reflected),
-                    ));
+                    return color_at(&Ray::new(hit.p, reflected), world, depth + 1);
                 }
             }
+        }
+    }
+}
+
+struct Point {
+    p: Vec3,
+    eps: f64,
+    material: Material,
+}
+
+impl Point {
+    #[allow(dead_code)]
+    fn new(p: Vec3, eps: f64) -> Self {
+        Self {
+            p,
+            eps,
+            material: Material::Simple(Color::Red.into()),
+        }
+    }
+}
+
+impl Hittable for Point {
+    fn hit(&self, ray: &Ray, t_min: f64, t_max: f64) -> Option<Hit> {
+        let d = &ray.direction;
+        let r_sq = d.x * d.x + d.y * d.y + d.z * d.z;
+
+        let t = (d.x * (self.p.x - ray.origin.x)
+            + d.y * (self.p.y - ray.origin.y)
+            + d.z * (self.p.z - ray.origin.z))
+            / r_sq;
+
+        if t > t_min && t < t_max {
+            let closest = ray.origin + t * ray.direction;
+            if self.p.distance(&closest) < self.eps {
+                println!("hit at {:?}", closest);
+                return Some(Hit::new(t, self.p.clone(), -ray.direction, &self.material));
+            } else {
+                return None;
+            }
+        } else {
+            return None;
         }
     }
 }
@@ -370,10 +399,10 @@ impl Sphere {
 
 impl Hittable for Sphere {
     fn hit(&self, ray: &Ray, t_min: f64, t_max: f64) -> Option<Hit> {
-        let oc = &ray.origin - &self.center;
-        let a = Vec3::dot(&ray.direction, &ray.direction);
-        let b = Vec3::dot(&oc, &ray.direction);
-        let c = Vec3::dot(&oc, &oc) - self.radius * self.radius;
+        let oc = ray.origin - self.center;
+        let a = Vec3::dot(ray.direction, ray.direction);
+        let b = Vec3::dot(oc, ray.direction);
+        let c = Vec3::dot(oc, oc) - self.radius * self.radius;
         let discriminant = b * b - a * c;
         if discriminant < 0.0 {
             None
@@ -384,7 +413,7 @@ impl Hittable for Sphere {
                 return Some(Hit::new(
                     p,
                     pp,
-                    (&pp - &self.center) / self.radius,
+                    (pp - self.center) / self.radius,
                     &self.material,
                 ));
             }
@@ -394,7 +423,7 @@ impl Hittable for Sphere {
                 return Some(Hit::new(
                     p,
                     pp,
-                    (&pp - &self.center) / self.radius,
+                    (pp - self.center) / self.radius,
                     &self.material,
                 ));
             }
@@ -423,20 +452,21 @@ impl Default for Camera {
 }
 impl Camera {
     fn new(lookfrom: Vec3, lookat: Vec3, vup: Vec3, vfov: f64, aspect: f64) -> Self {
-        let lookfrom = lookfrom.as_unit_vec();
-        let lookat = lookat.as_unit_vec();
+        let lookfrom = lookfrom;
+        let lookat = lookat;
+
         let vup = vup.as_unit_vec();
         let theta = vfov * PI / 180.0;
         let half_height = (theta / 2.0).tan();
         let half_width = aspect * half_height;
-        let w = (&lookfrom - &lookat).as_unit_vec();
-        let u = Vec3::cross(&vup, &w).as_unit_vec();
-        let v = Vec3::cross(&w, &u);
+        let w = (lookfrom - lookat).as_unit_vec();
+        let u = Vec3::cross(vup, w).as_unit_vec();
+        let v = Vec3::cross(w, u);
 
         Self {
-            lower_left_corner: &(&(&lookfrom - &(half_width * &u)) - &(half_height * &v)) - &w,
-            horizontal: 2.0 * &(half_width * &u),
-            vertical: 2.0 * &(half_height * &v),
+            lower_left_corner: lookfrom - (half_width * u) - (half_height * v) - w,
+            horizontal: 2.0 * half_width * u,
+            vertical: 2.0 * half_height * v,
             origin: lookfrom,
         }
     }
@@ -444,27 +474,22 @@ impl Camera {
     fn get_ray(&self, u: f64, v: f64) -> Ray {
         Ray::new(
             self.origin,
-            &self.lower_left_corner + &(&(u * &self.horizontal) + &(v * &self.vertical)),
+            self.lower_left_corner + u * self.horizontal + v * self.vertical - self.origin,
         )
     }
 }
 
-fn color(r: &Ray, world: &World, depth: u32) -> Vec3 {
+fn color_at(r: &Ray, world: &World, depth: u32) -> Vec3 {
     if let Some(hit) = world.hit(r, 0.001, f64::MAX) {
         if depth < 50 {
-            if let Some(srec) = hit.material.scatter(r, &hit) {
-                return srec.attenuation * color(&srec.scattered, world, depth + 1);
-            } else {
-                return Vec3::new(0, 0, 0);
-            }
+            return hit.material.color(world, r, &hit, depth + 1);
         } else {
             return Vec3::new(0, 0, 0);
         }
     } else {
         let ray_unit = r.direction.as_unit_vec();
         let t = 0.5 * (ray_unit.y + 1.0);
-        let v2 = Vec3::new(0.5, 0.7, 1.0);
-        return &((1.0 - t) * &Vec3::new(1.0, 1.0, 1.0)) + &(t * &Vec3::new(0.5, 0.7, 1.0));
+        return (1.0 - t) * Vec3::new(1.0, 1.0, 1.0) + t * Vec3::new(0.5, 0.7, 1.0);
     }
 }
 
@@ -472,10 +497,14 @@ fn main() -> Result<(), ImageError> {
     let (width, height) = (400, 200);
     let samples = 50;
     let world = World::new()
+        /*
+        .add(Box::new(Point::new(Vec3::new(-0.5, 0.0, -1.0), 0.05)))
+            .add(Box::new(Point::new(Vec3::new(0.5, 0.0, -1.0), 0.05)))
+        */
         .add(Box::new(Sphere::new(
             Vec3::new(0, 0, -1),
-            0.5,
-            Material::Lambertian(Vec3::new(0.1, 0.2, 0.5)),
+            0.4,
+            Material::Lambertian(Color::Green.into()),
         )))
         .add(Box::new(Sphere::new(
             Vec3::new(0.0, -100.5, -1.0),
@@ -490,12 +519,7 @@ fn main() -> Result<(), ImageError> {
         .add(Box::new(Sphere::new(
             Vec3::new(-1, 0, -1),
             0.5,
-            Material::Dielectric(1.5),
-        )))
-        .add(Box::new(Sphere::new(
-            Vec3::new(-1, 0, -1),
-            -0.45,
-            Material::Dielectric(1.5),
+            Material::Dielectric(Vec3::new(0.9, 0.9, 1.0), 1.15),
         )));
     let camera: Camera = Camera::new(
         Vec3::new(-2.0, 2.0, 1.0),
@@ -504,16 +528,20 @@ fn main() -> Result<(), ImageError> {
         90.0,
         width as f64 / height as f64,
     );
-    println!("{:?}", camera);
-    println!("ray to lookat: {:?}", camera.get_ray(0.5, 0.5));
+
     let mut rng = thread_rng();
     let img: RgbImage = ImageBuffer::from_fn(width, height, |x, y| {
         let mut colors = Vec3::new(0.0, 0.0, 0.0);
         for _ in 0..samples {
-            let u = (x as f64 + rng.gen_range(0.0..1.0)) / width as f64;
-            let v = ((height - y) as f64 + rng.gen_range(0.0..1.0)) / height as f64; // adjust for image coordinate system
+            let u = (x as f64 + rng.gen_range(0.0..0.3)) / width as f64;
+            let v = ((height - y) as f64 + rng.gen_range(0.0..0.3)) / height as f64; // adjust for image coordinate system
+
+            //let u = x as f64 / width as f64;
+            //let v = (height - y) as f64 / height as f64;
             let r = camera.get_ray(u, v);
-            colors += color(&r, &world, 0);
+            //println!("ray to (u,v): ({}, {})", u, v);
+            //println!("{:?}", r);
+            colors += color_at(&r, &world, 0);
         }
         let colors = colors / samples as f64;
         let colors = Vec3::new(colors.x.sqrt(), colors.y.sqrt(), colors.z.sqrt());
@@ -541,9 +569,6 @@ mod test {
 
     #[test]
     fn test_add_vec() {
-        assert_eq!(
-            Vec3::new(1, 1, 0),
-            &Vec3::new(1, 0, 0) + &Vec3::new(0, 1, 0)
-        );
+        assert_eq!(Vec3::new(1, 1, 0), Vec3::new(1, 0, 0) + Vec3::new(0, 1, 0));
     }
 }
