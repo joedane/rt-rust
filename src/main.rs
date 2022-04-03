@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use image::{error::ImageError, ImageBuffer, Rgb, RgbImage};
+use image::{error::ImageError, ImageBuffer, Rgb};
 use rand::{thread_rng, Rng};
 
 #[derive(Clone, Copy, Debug)]
@@ -226,7 +226,7 @@ trait Hittable {
 }
 
 struct World {
-    objects: Vec<Box<dyn Hittable>>,
+    objects: Vec<Box<dyn Hittable + Sync + Send>>,
 }
 
 impl World {
@@ -234,7 +234,7 @@ impl World {
         Self { objects: vec![] }
     }
 
-    fn add(mut self, o: Box<dyn Hittable>) -> Self {
+    fn add(mut self, o: Box<dyn Hittable + Sync + Send>) -> Self {
         self.objects.push(o);
         self
     }
@@ -437,6 +437,7 @@ struct Camera {
     lower_left_corner: Vec3,
     u: Vec3,
     v: Vec3,
+    #[allow(dead_code)]
     w: Vec3,
     horizontal: Vec3,
     vertical: Vec3,
@@ -506,9 +507,34 @@ fn color_at(r: &Ray, world: &World, depth: u32) -> Vec3 {
     }
 }
 
+fn sample_color_at(
+    camera: &Camera,
+    world: &World,
+    samples: u8,
+    width: u32,
+    height: u32,
+    x: u32,
+    y: u32,
+) -> Vec3 {
+    let mut rng = thread_rng();
+    let mut colors = Vec3::new(0.0, 0.0, 0.0);
+    for _ in 0..samples {
+        let u = (x as f64 + rng.gen_range(0.0..0.3)) / width as f64;
+        let v = ((height - y) as f64 + rng.gen_range(0.0..0.3)) / height as f64; // adjust for image coordinate system
+
+        //let u = x as f64 / width as f64;
+        //let v = (height - y) as f64 / height as f64;
+        let r = camera.get_ray(u, v);
+        //println!("ray to (u,v): ({}, {})", u, v);
+        //println!("{:?}", r);
+        colors += color_at(&r, &world, 0);
+    }
+    let colors = colors / samples as f64;
+    return Vec3::new(colors.x.sqrt(), colors.y.sqrt(), colors.z.sqrt());
+}
 fn main() -> Result<(), ImageError> {
     // test commit to rayon branch
-    let (width, height) = (400, 200);
+    let (width, height) = (1000, 600);
     let samples = 50;
     let world = World::new()
         /*
@@ -544,27 +570,25 @@ fn main() -> Result<(), ImageError> {
         0.2,
     );
 
-    let mut rng = thread_rng();
-    let img: RgbImage = ImageBuffer::from_fn(width, height, |x, y| {
-        let mut colors = Vec3::new(0.0, 0.0, 0.0);
-        for _ in 0..samples {
-            let u = (x as f64 + rng.gen_range(0.0..0.3)) / width as f64;
-            let v = ((height - y) as f64 + rng.gen_range(0.0..0.3)) / height as f64; // adjust for image coordinate system
+    let mut img = ImageBuffer::new(width, height);
 
-            //let u = x as f64 / width as f64;
-            //let v = (height - y) as f64 / height as f64;
-            let r = camera.get_ray(u, v);
-            //println!("ray to (u,v): ({}, {})", u, v);
-            //println!("{:?}", r);
-            colors += color_at(&r, &world, 0);
+    rayon::scope(|s| {
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            /*
+             * shadow these variables to avoid capturing outer scope
+             */
+            let camera = &camera;
+            let world = &world;
+            s.spawn(move |_| {
+                let colors = sample_color_at(camera, world, samples, width, height, x, y);
+
+                *p = Rgb([
+                    (255.0 * colors.x) as u8,
+                    (255.0 * colors.y) as u8,
+                    (255.0 * colors.z) as u8,
+                ]);
+            });
         }
-        let colors = colors / samples as f64;
-        let colors = Vec3::new(colors.x.sqrt(), colors.y.sqrt(), colors.z.sqrt());
-        Rgb([
-            (255.0 * colors.x) as u8,
-            (255.0 * colors.y) as u8,
-            (255.0 * colors.z) as u8,
-        ])
     });
     img.save("file.jpg")?;
     Ok(())
