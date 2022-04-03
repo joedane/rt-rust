@@ -507,6 +507,7 @@ fn color_at(r: &Ray, world: &World, depth: u32) -> Vec3 {
 }
 
 fn main() -> Result<(), ImageError> {
+    // test commit to rayon branch
     let (width, height) = (400, 200);
     let samples = 50;
     let world = World::new()
