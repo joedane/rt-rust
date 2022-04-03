@@ -435,11 +435,16 @@ impl Hittable for Sphere {
 #[derive(Debug)]
 struct Camera {
     lower_left_corner: Vec3,
+    u: Vec3,
+    v: Vec3,
+    w: Vec3,
     horizontal: Vec3,
     vertical: Vec3,
     origin: Vec3,
+    lens_radius: f64,
 }
 
+/*
 impl Default for Camera {
     fn default() -> Self {
         Self {
@@ -450,11 +455,9 @@ impl Default for Camera {
         }
     }
 }
+*/
 impl Camera {
-    fn new(lookfrom: Vec3, lookat: Vec3, vup: Vec3, vfov: f64, aspect: f64) -> Self {
-        let lookfrom = lookfrom;
-        let lookat = lookat;
-
+    fn new(lookfrom: Vec3, lookat: Vec3, vup: Vec3, vfov: f64, aspect: f64, aperture: f64) -> Self {
         let vup = vup.as_unit_vec();
         let theta = vfov * PI / 180.0;
         let half_height = (theta / 2.0).tan();
@@ -462,19 +465,29 @@ impl Camera {
         let w = (lookfrom - lookat).as_unit_vec();
         let u = Vec3::cross(vup, w).as_unit_vec();
         let v = Vec3::cross(w, u);
+        let focal_len = (lookfrom - lookat).length();
 
         Self {
-            lower_left_corner: lookfrom - (half_width * u) - (half_height * v) - w,
-            horizontal: 2.0 * half_width * u,
-            vertical: 2.0 * half_height * v,
+            lower_left_corner: lookfrom
+                - (half_width * focal_len * u)
+                - (half_height * focal_len * v)
+                - focal_len * w,
+            u,
+            v,
+            w,
+            horizontal: 2.0 * focal_len * half_width * u,
+            vertical: 2.0 * focal_len * half_height * v,
             origin: lookfrom,
+            lens_radius: aperture / 2.0,
         }
     }
 
-    fn get_ray(&self, u: f64, v: f64) -> Ray {
+    fn get_ray(&self, s: f64, t: f64) -> Ray {
+        let rd = self.lens_radius * Vec3::random_in_unit_sphere();
+        let offset = self.u * rd.x + self.v * rd.y; // FIXME -- where's "z"?
         Ray::new(
-            self.origin,
-            self.lower_left_corner + u * self.horizontal + v * self.vertical - self.origin,
+            self.origin + offset,
+            self.lower_left_corner + s * self.horizontal + t * self.vertical - self.origin - offset,
         )
     }
 }
@@ -503,8 +516,8 @@ fn main() -> Result<(), ImageError> {
         */
         .add(Box::new(Sphere::new(
             Vec3::new(0, 0, -1),
-            0.4,
-            Material::Lambertian(Color::Green.into()),
+            0.5,
+            Material::Lambertian(Vec3::new(0.1, 0.2, 0.5)),
         )))
         .add(Box::new(Sphere::new(
             Vec3::new(0.0, -100.5, -1.0),
@@ -514,7 +527,7 @@ fn main() -> Result<(), ImageError> {
         .add(Box::new(Sphere::new(
             Vec3::new(1, 0, -1),
             0.5,
-            Material::Metal(Vec3::new(0.8, 0.6, 0.2), 0.4),
+            Material::Metal(Vec3::new(0.8, 0.6, 0.2), 0.0),
         )))
         .add(Box::new(Sphere::new(
             Vec3::new(-1, 0, -1),
@@ -522,11 +535,12 @@ fn main() -> Result<(), ImageError> {
             Material::Dielectric(Vec3::new(0.9, 0.9, 1.0), 1.15),
         )));
     let camera: Camera = Camera::new(
-        Vec3::new(-2.0, 2.0, 1.0),
+        Vec3::new(0.0, 0.0, 1.0),
         Vec3::new(0.0, 0.0, -1.0),
         Vec3::new(0, 1, 0),
-        90.0,
+        60.0,
         width as f64 / height as f64,
+        0.2,
     );
 
     let mut rng = thread_rng();
