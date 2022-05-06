@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 
 use image::{error::ImageError, ImageBuffer, Rgb};
-use rand::{thread_rng, Rng};
+use rand::{distributions::Distribution, distributions::Uniform, thread_rng, Rng};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Vec3 {
@@ -226,7 +226,7 @@ trait Hittable {
 }
 
 struct World {
-    objects: Vec<Box<dyn Hittable + Sync + Send>>,
+    objects: Vec<Box<dyn Hittable + Sync>>,
 }
 
 impl World {
@@ -234,9 +234,13 @@ impl World {
         Self { objects: vec![] }
     }
 
-    fn add(mut self, o: Box<dyn Hittable + Sync + Send>) -> Self {
+    fn build(mut self, o: Box<dyn Hittable + Sync>) -> Self {
         self.objects.push(o);
         self
+    }
+
+    fn add(&mut self, o: Box<dyn Hittable + Sync + Send>) {
+        self.objects.push(o);
     }
 }
 
@@ -534,40 +538,73 @@ fn sample_color_at(
 }
 fn main() -> Result<(), ImageError> {
     // test commit to rayon branch
-    let (width, height) = (1000, 600);
+    let (width, height) = (1200, 900);
     let samples = 50;
-    let world = World::new()
-        /*
-        .add(Box::new(Point::new(Vec3::new(-0.5, 0.0, -1.0), 0.05)))
-            .add(Box::new(Point::new(Vec3::new(0.5, 0.0, -1.0), 0.05)))
-        */
-        .add(Box::new(Sphere::new(
-            Vec3::new(0, 0, -1),
-            0.5,
-            Material::Lambertian(Vec3::new(0.1, 0.2, 0.5)),
-        )))
-        .add(Box::new(Sphere::new(
-            Vec3::new(0.0, -100.5, -1.0),
-            100.0,
-            Material::Lambertian(Vec3::new(0.8, 0.8, 0.0)),
-        )))
-        .add(Box::new(Sphere::new(
-            Vec3::new(1, 0, -1),
-            0.5,
-            Material::Metal(Vec3::new(0.8, 0.6, 0.2), 0.0),
-        )))
-        .add(Box::new(Sphere::new(
-            Vec3::new(-1, 0, -1),
-            0.5,
-            Material::Dielectric(Vec3::new(0.9, 0.9, 1.0), 1.15),
-        )));
+    let mut world = World::new();
+    world.add(Box::new(Sphere::new(
+        Vec3::new(0, -1000, 0),
+        1000.0,
+        Material::Lambertian(Vec3::new(0.5, 0.5, 0.5)),
+    )));
+    let mut rng = thread_rng();
+    let d = Uniform::new(0.0f64, 1.0f64);
+    for a in -11..11 {
+        for b in -11..11 {
+            let m: f64 = rng.gen();
+            let center = Vec3::new(
+                a as f64 + 0.9 * d.sample(&mut rng),
+                0.2,
+                b as f64 + 0.9 * d.sample(&mut rng),
+            );
+            if (center - Vec3::new(4.0, 0.2, 0.0)).length() > 0.9 {
+                world.add(Box::new(Sphere::new(
+                    center,
+                    0.2,
+                    if m < 0.8 {
+                        Material::Lambertian(Vec3::new(
+                            d.sample(&mut rng) * d.sample(&mut rng),
+                            d.sample(&mut rng) * d.sample(&mut rng),
+                            d.sample(&mut rng) * d.sample(&mut rng),
+                        ))
+                    } else if m < 0.95 {
+                        Material::Metal(
+                            Vec3::new(
+                                0.5 * (1.0 + d.sample(&mut rng)),
+                                0.5 * (1.0 + d.sample(&mut rng)),
+                                0.5 * (1.0 + d.sample(&mut rng)),
+                            ),
+                            0.0,
+                        )
+                    } else {
+                        Material::Dielectric(Vec3::new(1, 1, 1), 1.10)
+                    },
+                )));
+            }
+        }
+    }
+    world.add(Box::new(Sphere::new(
+        Vec3::new(0, 1, 0),
+        1.0,
+        Material::Dielectric(Vec3::new(1, 1, 1), 1.5),
+    )));
+    world.add(Box::new(Sphere::new(
+        Vec3::new(-4, 1, 0),
+        1.0,
+        Material::Lambertian(Vec3::new(0.4, 0.2, 0.1)),
+    )));
+    world.add(Box::new(Sphere::new(
+        Vec3::new(4, 1, 0),
+        1.0,
+        Material::Metal(Vec3::new(0.7, 0.6, 0.5), 0.1),
+    )));
+
     let camera: Camera = Camera::new(
-        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(12.0, 2.0, 1.5),
         Vec3::new(0.0, 0.0, -1.0),
         Vec3::new(0, 1, 0),
-        60.0,
+        30.0,
         width as f64 / height as f64,
-        0.2,
+        0.1,
     );
 
     let mut img = ImageBuffer::new(width, height);
